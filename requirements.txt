@@ -1,0 +1,10 @@
+ultralytics
+torch
+torchvision
+pandas
+openpyxl
+Pillow
+flask
+opencv-python
+scikit-learn
+easyocr

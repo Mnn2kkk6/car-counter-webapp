@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Đếm xe ô tô tự động — YOLOv8x</title>
+<style>
+  :root {
+    --primary: #1F4E78;
+    --primary-light: #2f6fa8;
+    --bg: #f4f6f8;
+    --border: #d5dbe2;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    margin: 0;
+    padding: 40px 20px;
+    color: #1a1a1a;
+  }
+  .container {
+    max-width: 780px;
+    margin: 0 auto;
+  }
+  h1 {
+    text-align: center;
+    color: var(--primary);
+    font-size: 26px;
+    margin-bottom: 4px;
+  }
+  p.subtitle {
+    text-align: center;
+    color: #666;
+    margin-top: 0;
+    margin-bottom: 28px;
+  }
+  #dropzone {
+    border: 2px dashed var(--border);
+    border-radius: 12px;
+    background: white;
+    padding: 50px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  #dropzone.dragover {
+    border-color: var(--primary-light);
+    background: #eaf2f8;
+  }
+  #dropzone p {
+    margin: 8px 0 0;
+    color: #555;
+  }
+  #dropzone .icon {
+    font-size: 40px;
+  }
+  #fileInput { display: none; }
+  #status {
+    text-align: center;
+    margin-top: 16px;
+    color: var(--primary-light);
+    font-weight: 500;
+    min-height: 20px;
+  }
+  #result {
+    margin-top: 28px;
+    display: none;
+  }
+  #countBanner {
+    background: var(--primary);
+    color: white;
+    text-align: center;
+    padding: 14px;
+    border-radius: 10px;
+    font-size: 20px;
+    font-weight: 600;
+    margin-bottom: 16px;
+  }
+  #resultImg {
+    width: 100%;
+    border-radius: 10px;
+    display: block;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+  }
+  #resetBtn {
+    display: block;
+    margin: 20px auto 0;
+    padding: 10px 22px;
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    color: #333;
+  }
+  #resetBtn:hover { background: #eee; }
+  #vehicleList {
+    list-style: none;
+    padding: 0;
+    margin: 18px 0 0;
+  }
+  #vehicleList li {
+    background: white;
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--primary-light);
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin-bottom: 8px;
+    font-size: 15px;
+    color: #333;
+  }
+  #vehicleList li.incomplete {
+    border-left-color: #c9a227;
+    color: #555;
+  }
+  .error {
+    color: #c0392b;
+    text-align: center;
+    margin-top: 14px;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Đếm xe ô tô tự động</h1>
+  <p class="subtitle">Thả ảnh vào khung bên dưới — hệ thống dùng YOLOv8x tự động phát hiện, đếm và vẽ bounding box cho từng xe.</p>
+
+  <div id="dropzone">
+    <div class="icon">🚗</div>
+    <p><strong>Kéo & thả ảnh vào đây</strong>, hoặc bấm để chọn ảnh</p>
+    <p style="font-size:13px;color:#999;">Hỗ trợ JPG, PNG</p>
+    <input type="file" id="fileInput" accept="image/*">
+  </div>
+
+  <div id="status"></div>
+  <div class="error" id="errorMsg"></div>
+
+  <div id="result">
+    <div id="countBanner"></div>
+    <img id="resultImg" alt="Kết quả nhận diện xe">
+    <ul id="vehicleList"></ul>
+    <button id="resetBtn">Đếm ảnh khác</button>
+  </div>
+</div>
+
+<script>
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('fileInput');
+const status = document.getElementById('status');
+const errorMsg = document.getElementById('errorMsg');
+const result = document.getElementById('result');
+const countBanner = document.getElementById('countBanner');
+const resultImg = document.getElementById('resultImg');
+const resetBtn = document.getElementById('resetBtn');
+
+dropzone.addEventListener('click', () => fileInput.click());
+
+dropzone.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  dropzone.classList.add('dragover');
+});
+dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+dropzone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dropzone.classList.remove('dragover');
+  if (e.dataTransfer.files.length) {
+    handleFile(e.dataTransfer.files[0]);
+  }
+});
+
+fileInput.addEventListener('change', () => {
+  if (fileInput.files.length) handleFile(fileInput.files[0]);
+});
+
+resetBtn.addEventListener('click', () => {
+  result.style.display = 'none';
+  dropzone.style.display = 'block';
+  fileInput.value = '';
+});
+
+async function handleFile(file) {
+  errorMsg.textContent = '';
+  result.style.display = 'none';
+  status.textContent = 'Đang xử lý ảnh, vui lòng chờ...';
+
+  const formData = new FormData();
+  formData.append('image', file);
+
+  try {
+    const res = await fetch('/detect', { method: 'POST', body: formData });
+    const data = await res.json();
+
+    if (!res.ok) {
+      errorMsg.textContent = data.error || 'Có lỗi xảy ra, thử lại nhé.';
+      status.textContent = '';
+      return;
+    }
+
+    status.textContent = '';
+    countBanner.textContent = `Phát hiện ${data.count} xe ô tô`;
+    resultImg.src = data.image;
+
+    const list = document.getElementById('vehicleList');
+    list.innerHTML = '';
+    (data.vehicles || []).forEach((v) => {
+      const li = document.createElement('li');
+      li.textContent = v.label;
+      if (!v.color || !v.plate) li.classList.add('incomplete');
+      list.appendChild(li);
+    });
+
+    result.style.display = 'block';
+    dropzone.style.display = 'none';
+  } catch (err) {
+    status.textContent = '';
+    errorMsg.textContent = 'Không kết nối được tới server. Kiểm tra lại app.py đã chạy chưa.';
+  }
+}
+</script>
+</body>
+</html>
